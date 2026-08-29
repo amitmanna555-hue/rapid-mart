@@ -45,6 +45,36 @@ function App() {
   useEffect(() => {
     fetchInventory();
     fetchOrders();
+
+    // Real-time listener for orders table updates
+    const ordersChannel = supabase
+      .channel('public:orders')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'orders' },
+        (payload) => {
+          console.log('Realtime change received:', payload);
+          fetchOrders(); // Automatically refresh orders on any insert/update/delete
+        }
+      )
+      .subscribe();
+
+    // Real-time listener for inventory table updates
+    const inventoryChannel = supabase
+      .channel('public:inventory')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'inventory' },
+        (payload) => {
+          fetchInventory();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(ordersChannel);
+      supabase.removeChannel(inventoryChannel);
+    };
   }, []);
 
   const fetchInventory = async () => {
@@ -80,7 +110,6 @@ function App() {
       .select();
       
     if (!error && data) {
-      setInventory([...inventory, data[0]]);
       setNewItemName('');
       setNewItemPrice('');
       setNewItemStock('');
@@ -88,8 +117,7 @@ function App() {
   };
 
   const handleDeleteItem = async (id) => {
-    const { error } = await supabase.from('inventory').delete().eq('id', id);
-    if (!error) setInventory(inventory.filter(item => item.id !== id));
+    await supabase.from('inventory').delete().eq('id', id);
   };
 
   const addToCart = (item) => {
@@ -106,16 +134,14 @@ function App() {
     const itemNames = cart.map(i => i.Name).join(', ');
     const totalAmount = cart.reduce((sum, i) => sum + i.Price, 0);
 
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from('orders')
-      .insert([{ customer_name: customerName, items: itemNames, amount: totalAmount, status: 'Pending' }])
-      .select();
+      .insert([{ customer_name: customerName, items: itemNames, amount: totalAmount, status: 'Pending' }]);
 
     if (error) {
       alert("Order failed!");
     } else {
-      alert("🎉 Order placed successfully! Rapid Mart 10-min delivery initiated.");
-      setOrders([...orders, data[0]]);
+      alert("🎉 Order placed successfully! Live sync broadcasted to Rapid Mart hubs.");
       setCart([]);
       setCustomerName('');
     }
@@ -127,10 +153,7 @@ function App() {
     else if (currentStatus === 'Packed') nextStatus = 'Out for Delivery';
     else if (currentStatus === 'Out for Delivery') nextStatus = 'Delivered';
 
-    const { error } = await supabase.from('orders').update({ status: nextStatus }).eq('id', id);
-    if (!error) {
-      setOrders(orders.map(o => o.id === id ? { ...o, status: nextStatus } : o));
-    }
+    await supabase.from('orders').update({ status: nextStatus }).eq('id', id);
   };
 
   const handleRiderLogin = (e) => {
@@ -241,7 +264,7 @@ function App() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', backgroundColor: 'white', padding: '15px 20px', borderRadius: '10px', boxShadow: '0 2px 6px rgba(0,0,0,0.05)' }}>
                 <div>
                   <h4 style={{ margin: 0, color: '#0f172a' }}>Welcome, {currentRider} 👋</h4>
-                  <span style={{ fontSize: '0.8em', color: '#166534', fontWeight: 'bold' }}>● Active Delivery Partner</span>
+                  <span style={{ fontSize: '0.8em', color: '#166534', fontWeight: 'bold' }}>● Active Delivery Partner (Realtime Sync Active)</span>
                 </div>
                 <button onClick={() => setCurrentRider(null)} style={{ padding: '6px 12px', backgroundColor: '#ef4444', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '0.8em', fontWeight: 'bold' }}>
                   Logout
@@ -320,7 +343,7 @@ function App() {
   return (
     <div style={{ backgroundColor: '#f4f6f8', minHeight: '100vh', fontFamily: "'Inter', sans-serif", paddingBottom: '60px' }}>
       <header style={{ backgroundColor: '#0f172a', color: 'white', padding: '15px 30px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: '0 4px 12px rgba(0,0,0,0.15)', flexWrap: 'wrap', gap: '10px' }}>
-        <h2 style={{ margin: 0, color: '#22c55e', fontWeight: '900' }}>RAPID <span style={{ color: '#facc15' }}>MART</span> <span style={{ color: '#94a3b8', fontSize: '0.5em' }}>ADMIN CONSOLE</span></h2>
+        <h2 style={{ margin: 0, color: '#22c55e', fontWeight: '900' }}>RAPID <span style={{ color: '#facc15' }}>MART</span> <span style={{ color: '#94a3b8', fontSize: '0.5em' }}>ADMIN CONSOLE (REALTIME)</span></h2>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
           <button onClick={() => setViewMode('rider')} style={{ padding: '8px 12px', backgroundColor: '#3b82f6', color: 'white', border: 'none', borderRadius: '6px', fontWeight: 'bold', cursor: 'pointer', fontSize: '0.85em' }}>
             Rider Portal 🛵
@@ -339,7 +362,7 @@ function App() {
           
           {/* Live Orders from Database */}
           <div style={{ backgroundColor: 'white', padding: '25px', borderRadius: '12px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
-            <h3 style={{ margin: '0 0 15px 0', color: '#0f172a' }}>⚡ Live Cloud Orders (From Customer Shop)</h3>
+            <h3 style={{ margin: '0 0 15px 0', color: '#0f172a' }}>⚡ Live Cloud Orders (Realtime Synced)</h3>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85em' }}>
                 <thead>
